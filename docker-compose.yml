@@ -1,0 +1,148 @@
+version: '3.8'
+
+services:
+  # Portainer - Container Management UI
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - homelab
+
+  # SWAG - Reverse Proxy with SSL
+  swag:
+    image: lscr.io/linuxserver/swag:latest
+    container_name: swag
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-UTC}
+      - URL=${DOMAIN:-example.com}
+      - SUBDOMAINS=wildcard
+      - VALIDATION=http
+      - EMAIL=${EMAIL:-admin@example.com}
+    volumes:
+      - ./config/swag:/config
+    ports:
+      - "443:443"
+      - "80:80"
+    restart: unless-stopped
+    networks:
+      - homelab
+
+  # Authelia - Authentication Service
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./config/authelia:/config
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
+    networks:
+      - homelab
+    depends_on:
+      - redis
+
+  # Redis - Session Storage for Authelia
+  redis:
+    image: redis:alpine
+    container_name: redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - homelab
+
+  # SearXNG - Privacy-focused Search Engine
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    environment:
+      - BASE_URL=https://search.${DOMAIN:-example.com}
+      - INSTANCE_NAME=SearXNG
+    volumes:
+      - ./config/searxng:/etc/searxng
+    ports:
+      - "8888:8080"
+    restart: unless-stopped
+    networks:
+      - homelab
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+
+  # Matrix Synapse - Chat Server
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: synapse
+    environment:
+      - SYNAPSE_SERVER_NAME=${DOMAIN:-example.com}
+      - SYNAPSE_REPORT_STATS=no
+      - SYNAPSE_CONFIG_PATH=/data/homeserver.yaml
+    volumes:
+      - ./config/synapse:/data
+    ports:
+      - "8008:8008"
+    restart: unless-stopped
+    networks:
+      - homelab
+
+  # Prometheus - Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - homelab
+
+  # Grafana - Monitoring Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    driver: bridge
+
+volumes:
+  portainer_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
